@@ -1,9 +1,9 @@
 #include <Arduino.h>
 
-// Code for grip exoskeleton PCB. Reads voltage at sensor inputs, if certain thresholds are reached, change Valve configuration
+// Code for grip exoskeleton PCB v1. Reads voltage at sensor inputs, if certain thresholds are reached, change Valve configuration
 
-// The PCB has 10 sensor ports for option of using both FSR's and flex Sensors (A and B)
-// Sensor 1 is the highest port on the left of the ESP
+// The PCB has 10 sensor ports for option of using both FSR's and flex Sensors 
+// Flex sensors to be connected on left side, FSR's on right
 
 #define BUFFER_SIZE 10
 
@@ -22,11 +22,14 @@ struct flex_values {
 };
 
 
-struct valve{
-  int pinA;     //motor 1 pin
-  int pinB;     //motor 2 pin
-  bool active;  //is it in use? 
+struct valve {
+  int pinA;  // valve 1
+  int pinB;  // valve 2
+  int channelA; // valve 1 pwm ledc 
+  int channelB; // valve 2 pwm ledc
+  bool active;  //is it in use ? For testing mostly
 };
+
 
 sensor Flex[]= {
   // 5 flex Sensors
@@ -46,12 +49,12 @@ sensor FSR[]{
   {27,false}
 };
 
-valve Valves[] {
-  {2,15,true},
-  {16,4,false},
-  {5,17,false},
-  {19,18,false},
-  {3,21,false},  
+valve Valves[] = {
+  {2,  15, 0, 1, true},
+  {16,  4, 2, 3, false},
+  {5,  17, 4, 5, false},
+  {19, 18, 6, 7, false},
+  {3,  21, 8, 9, false},
 };
 
 sensor active_flex[5];
@@ -66,7 +69,7 @@ int activeValves = 0;
 
 flex_values Flex_Values[5];
 
-
+// This function works as a circular buffer - write new values in next position, and when the buffer is full flip index back to 0 and start overwriting
 void push_value(flex_values &f, int new_value) {
   f.buffer[f.index] = new_value;
   f.index = (f.index + 1) % BUFFER_SIZE;  // wrap around
@@ -100,6 +103,10 @@ void setup() {
   for (int i = 0; i < activeValves; i++) {
     pinMode(active_valves[i].pinA, OUTPUT);
     pinMode(active_valves[i].pinB, OUTPUT);
+    ledcSetup(active_valves[i].channelA, 100, 8);
+    ledcAttachPin(active_valves[i].pinA, active_valves[i].channelA);
+    ledcSetup(active_valves[i].channelB, 100, 8);
+    ledcAttachPin(active_valves[i].pinB, active_valves[i].channelB);
   }
 }
 
@@ -112,7 +119,8 @@ void loop() {
     push_value(Flex_Values[i], current);
     int avg = get_average(Flex_Values[i]);
     Flex_Values[i].difference = current - avg;
-
+    // calculate pwm duty cycle by mapping expected values (100 - 1000, change as needed) to 0-255 (boundaries accepted by ledc)
+    int duty = constrain(map(abs(Flex_Values[i].difference), 100, 1000, 50, 255), 0, 255); 
     Serial.print("Sensor "); Serial.print(i);
     Serial.print("  raw="); Serial.print(current);
     Serial.print("  avg="); Serial.print(avg);
@@ -120,14 +128,14 @@ void loop() {
 
 
     if(Flex_Values[i].difference < -100){
-      digitalWrite(active_valves[i].pinA, HIGH);
+      ledcWrite(active_valves[i].channelA, duty);   // Send PWM signal instead of pure acive high/low
       digitalWrite(active_valves[i].pinB, LOW);
       Serial.println("           INFLATING");
     }
 
     else if(Flex_Values[i].difference > 100){
       digitalWrite(active_valves[i].pinA, LOW);
-      digitalWrite(active_valves[i].pinB, HIGH);
+      ledcWrite(active_valves[i].channelB, duty);
       Serial.println("           DEFLATING");
     }
     else{
