@@ -18,7 +18,7 @@ struct flex_values {
   int buffer[BUFFER_SIZE];
   int index;        // current position in buffer
   int count;        // how many values stored so far
-  int difference;
+  int difference;   
 };
 
 
@@ -103,9 +103,9 @@ void setup() {
   for (int i = 0; i < activeValves; i++) {
     pinMode(active_valves[i].pinA, OUTPUT);
     pinMode(active_valves[i].pinB, OUTPUT);
-    ledcSetup(active_valves[i].channelA, 100, 8);
+    ledcSetup(active_valves[i].channelA, 50, 8);
     ledcAttachPin(active_valves[i].pinA, active_valves[i].channelA);
-    ledcSetup(active_valves[i].channelB, 100, 8);
+    ledcSetup(active_valves[i].channelB, 50, 8);
     ledcAttachPin(active_valves[i].pinB, active_valves[i].channelB);
   }
 }
@@ -129,18 +129,18 @@ void loop() {
 
     if(Flex_Values[i].difference < -100){
       ledcWrite(active_valves[i].channelA, duty);   // Send PWM signal instead of pure acive high/low
-      digitalWrite(active_valves[i].pinB, LOW);
+      ledcWrite(active_valves[i].channelB, 0);
       Serial.println("           INFLATING");
     }
 
     else if(Flex_Values[i].difference > 100){
-      digitalWrite(active_valves[i].pinA, LOW);
+      ledcWrite(active_valves[i].channelA, 0);
       ledcWrite(active_valves[i].channelB, duty);
       Serial.println("           DEFLATING");
     }
     else{
-      digitalWrite(active_valves[i].pinA, LOW);
-      digitalWrite(active_valves[i].pinB, LOW);
+      ledcWrite(active_valves[i].channelA, 0);
+      ledcWrite(active_valves[i].channelB, 0);
       Serial.println("           HOLDING");
     }
   }
