@@ -34,9 +34,9 @@ struct valve {
 sensor Flex[]= {
   // 5 flex Sensors
   {39,true},
-  {35,false},
-  {33,false},
-  {26,false},
+  {35,true},
+  {33,true},
+  {26,true},
   {14,false}
 };
 
@@ -51,9 +51,9 @@ sensor FSR[]{
 
 valve Valves[] = {
   {2,  15, 0, 1, true},
-  {16,  4, 2, 3, false},
-  {5,  17, 4, 5, false},
-  {19, 18, 6, 7, false},
+  {16,  4, 2, 3, true},
+  {5,  17, 4, 5, true},
+  {19, 18, 6, 7, true},
   {3,  21, 8, 9, false},
 };
 
@@ -111,38 +111,61 @@ void setup() {
 }
 
 void loop() {
-//Each loop cycle, read all active Sensors, check against change conditions
-// For flex sensor, check change against previous value, if change greater/less than some +-preset then inflate/deflate muscle, else hold
-// For FSR, if value is low then deflate muscle, if it is above a middle threshold then hold, and if above highest threshold inflate
+  // If flex sensor is bent beyond a threshold, slowly inflate the active muscles,
+  // hold the grip briefly, then deflate.
+
   for (int i = 0; i < activeFlex; i++){
     int current = analogRead(active_flex[i].pin);
-    push_value(Flex_Values[i], current);
-    int avg = get_average(Flex_Values[i]);
-    Flex_Values[i].difference = current - avg;
-    // calculate pwm duty cycle by mapping expected values (100 - 1000, change as needed) to 0-255 (boundaries accepted by ledc)
-    int duty = constrain(map(abs(Flex_Values[i].difference), 100, 1000, 50, 255), 0, 255); 
-    Serial.print("Sensor "); Serial.print(i);
-    Serial.print("  raw="); Serial.print(current);
-    Serial.print("  avg="); Serial.print(avg);
-    Serial.print("  diff="); Serial.println(Flex_Values[i].difference);
+    
+    Serial.print("Sensor ");
+    Serial.print(i);
+    Serial.print(" raw=");
+    Serial.println(current);
 
+    if (current < 500) { //TEST FOR CURRENT VALUE
+      Serial.println("FLEX DETECTED: STARTING GRIP DEMO");
 
-    if(Flex_Values[i].difference < -100){
-      ledcWrite(active_valves[i].channelA, duty);   // Send PWM signal instead of pure acive high/low
-      ledcWrite(active_valves[i].channelB, 0);
-      Serial.println("           INFLATING");
-    }
+      // Slowly inflate
+      for (int duty = 0; duty <= 180; duty += 5) {
+        for (int j = 0; j < activeValves; j++) {
+          ledcWrite(active_valves[j].channelA, duty);  // inflate
+          ledcWrite(active_valves[j].channelB, 0);
+        }
 
-    else if(Flex_Values[i].difference > 100){
-      ledcWrite(active_valves[i].channelA, 0);
-      ledcWrite(active_valves[i].channelB, duty);
-      Serial.println("           DEFLATING");
-    }
-    else{
-      ledcWrite(active_valves[i].channelA, 0);
-      ledcWrite(active_valves[i].channelB, 0);
-      Serial.println("           HOLDING");
+        Serial.print("Inflating, duty=");
+        Serial.println(duty);
+        delay(150);
+      }
+
+      // Hold grip
+      Serial.println("HOLDING GRIP");
+      for (int j = 0; j < activeValves; j++) {
+        ledcWrite(active_valves[j].channelA, 0);
+        ledcWrite(active_valves[j].channelB, 0);
+      }
+
+      delay(2000);
+
+      // Deflate
+      Serial.println("DEFLATING");
+      for (int j = 0; j < activeValves; j++) {
+        ledcWrite(active_valves[j].channelA, 0);
+        ledcWrite(active_valves[j].channelB, 180);
+      }
+
+      delay(2000);
+
+      // Stop all valves
+      Serial.println("DEMO COMPLETE");
+      for (int j = 0; j < activeValves; j++) {
+        ledcWrite(active_valves[j].channelA, 0);
+        ledcWrite(active_valves[j].channelB, 0);
+      }
+
+      // Wait before allowing another trigger
+      delay(3000);
     }
   }
+  
   delay(200);
 }
