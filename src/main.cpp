@@ -84,10 +84,15 @@ int flexOpenRaw[5];
 int flexCloseRaw[5];
 
 // ---- Tuning (in normalized 0-100% flex, so it's the same across all fingers) ----
-const int CLOSE_LEVEL = 60;   // above this % -> inflate. Raise to require firmer grip intent.
-const int OPEN_LEVEL  = 35;   // below this % -> deflate. The gap (35..60) is the HOLD deadband.
+const int TRIGGER_LEVEL = 60;
+const unsigned long INFLATE_TIME = 1000;
+const unsigned long HOLD_TIME    = 3000;
+const unsigned long RELEASE_TIME = 1500;
+
 const int MIN_DUTY    = 60;   // smallest PWM that actually cracks the valve (find by experiment)
 const int MAX_DUTY    = 255;
+bool      armed = true;
+const int REARM_LEVEL = 30; //set rearm level here as pct
 
 // ---------------------------------------------------------------------------
 
@@ -133,6 +138,37 @@ void calibrateFlex() {
   Serial.println();
 }
 
+enum DemoState {
+  WAIT_FOR_TRIGGER,
+  INFLATE_GRIP,
+  HOLD_GRIP,
+  RELEASE_GRIP
+};
+
+DemoState demoState = WAIT_FOR_TRIGGER;
+unsigned long stateStartTime = 0;
+
+void inflateAll() {
+  for (int i = 0; i < activeValves; i++) {
+    ledcWrite(active_valves[i].channelA, MAX_DUTY); // inlet open
+    ledcWrite(active_valves[i].channelB, 0);        // exhaust shut
+  }
+}
+
+void holdAll() {
+  for (int i = 0; i < activeValves; i++) {
+    ledcWrite(active_valves[i].channelA, 0);
+    ledcWrite(active_valves[i].channelB, 0);
+  }
+}
+
+void releaseAll() {
+  for (int i = 0; i < activeValves; i++) {
+    ledcWrite(active_valves[i].channelA, 0);
+    ledcWrite(active_valves[i].channelB, MAX_DUTY); // exhaust open
+  }
+}
+
 void setup() {
   Serial.begin(9600);
 
@@ -162,38 +198,78 @@ void setup() {
 }
 
 void loop() {
+  int maxPct = 0;
+  // Demo mode:
+  // flex sensor acts only as a trigger.
+  // Once triggered, all active valves inflate, hold, then release on a timer.
+  // REARM_LEVEL prevents repeated triggering until the hand opens again.
+  // Read all active flex sensors and find the strongest bend
   for (int i = 0; i < activeFlex; i++) {
     push_value(Flex_Values[i], analogRead(active_flex[i].pin));
-    int raw = get_average(Flex_Values[i]);   // noise-smoothed reading (low-pass)
+    int raw = get_average(Flex_Values[i]);
 
-    // Normalize to 0 (open) .. 100 (closed). Handles reversed sensors automatically
-    // because span can be negative; constrain clamps the ends.
     int span = flexCloseRaw[i] - flexOpenRaw[i];
-    if (span == 0) span = 1;                 // guard against a dead/uncalibrated sensor
+    if (span == 0) span = 1;
+
     int pct = constrain((long)(raw - flexOpenRaw[i]) * 100 / span, 0, 100);
 
-    const char* state;
-    if (pct >= CLOSE_LEVEL) {                          // user is closing -> inflate
-      int duty = constrain(map(pct, CLOSE_LEVEL, 100, MIN_DUTY, MAX_DUTY), 0, 255);
-      ledcWrite(active_valves[i].channelA, duty);      // inlet open
-      ledcWrite(active_valves[i].channelB, 0);         // exhaust shut
-      state = "INFLATE";
-    } else if (pct <= OPEN_LEVEL) {                    // user is opening -> deflate
-      ledcWrite(active_valves[i].channelA, 0);         // inlet shut
-      ledcWrite(active_valves[i].channelB, MAX_DUTY);  // exhaust open (full vent; make proportional for gentler release)
-      state = "DEFLATE";
-    } else {                                           // deadband -> hold
-      ledcWrite(active_valves[i].channelA, 0);
-      ledcWrite(active_valves[i].channelB, 0);         // both shut: muscle sealed at current pressure
-      state = "HOLD";
+    if (pct > maxPct) {
+      maxPct = pct;
+    }
+  }
+
+  unsigned long now = millis();
+
+  switch (demoState) {
+
+  case WAIT_FOR_TRIGGER:
+    holdAll();
+
+    if (maxPct <= REARM_LEVEL) {
+      armed = true;
     }
 
-    Serial.print("F"); Serial.print(i);
-    Serial.print(" raw="); Serial.print(raw);
-    Serial.print(" pct="); Serial.print(pct);
-    Serial.print(" ["); Serial.print(state); Serial.print("]  ");
-  }
-  Serial.println();
+    if (armed && maxPct >= TRIGGER_LEVEL) {
+      armed = false;
+      demoState = INFLATE_GRIP;
+      stateStartTime = now;
+      Serial.println("Triggered: INFLATE");
+    }
+    break;
 
-  delay(15);   // ~65 Hz. Keep small so the smoothing buffer stays fresh — do NOT use 200.
+    case INFLATE_GRIP:
+      inflateAll();
+
+      if (now - stateStartTime >= INFLATE_TIME) {
+        demoState = HOLD_GRIP;
+        stateStartTime = now;
+        Serial.println("HOLD");
+      }
+      break;
+
+    case HOLD_GRIP:
+      holdAll();
+
+      if (now - stateStartTime >= HOLD_TIME) {
+        demoState = RELEASE_GRIP;
+        stateStartTime = now;
+        Serial.println("RELEASE");
+      }
+      break;
+
+    case RELEASE_GRIP:
+      releaseAll();
+
+      if (now - stateStartTime >= RELEASE_TIME) {
+        demoState = WAIT_FOR_TRIGGER;
+        stateStartTime = now;
+        Serial.println("Ready again");
+      }
+      break;
+  }
+
+  Serial.print("maxPct = ");
+  Serial.println(maxPct);
+
+  delay(15);
 }
