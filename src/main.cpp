@@ -92,7 +92,7 @@ const unsigned long RELEASE_TIME = 1500;
 const int MIN_DUTY    = 60;   // smallest PWM that actually cracks the valve (find by experiment)
 const int MAX_DUTY    = 255;
 bool      armed = true;
-const int REARM_LEVEL = 30; //set rearm level here as pct
+const int REARM_LEVEL = 15; //set rearm level here as pct
 
 // ---------------------------------------------------------------------------
 
